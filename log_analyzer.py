@@ -224,9 +224,6 @@ def main(**param):
         request_time = float(next_line_info.request_time)
         url_times[url].append(request_time)
 
-        if line_count >= 100:
-            break
-
     error_perc = param.get('ERROR_PERC', 10.0)
     calc_error_perc = round(line_error/line_count * 100, 1)
     if calc_error_perc > error_perc:
