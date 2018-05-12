@@ -1,0 +1,7 @@
+{
+  "TS_FILENAME": "log_analyzer.ts",
+  "REPORT_DIR": "./report",
+  "LOG_DIR": "./log",
+  "LOGGING_FILENAME": null,
+  "ERROR_PERC": 10.0
+}
