@@ -8,7 +8,10 @@ import json
 import logging
 import os
 import settings
+import tempfile
 from collections import namedtuple, defaultdict
+from shutil import copy2
+from time import time
 # log_format ui_short '$remote_addr $remote_user $http_x_real_ip [$time_local] "$request" '
 #                     '$status $body_bytes_sent "$http_referer" '
 #                     '"$http_user_agent" "$http_x_forwarded_for" "$http_X_REQUEST_ID" "$http_X_RB_USER" '
@@ -170,11 +173,21 @@ def save_report(latest_logfile_info, report_dir, parse_data):
     _path_to_template = os.path.normpath(os.path.join(os.path.dirname(__file__), 'report.html'))
     with open(_path_to_template, mode='r') as _report_template_file:
         _report_template_data = _report_template_file.read().replace('$table_json', _table_json)
-        _path_to_report = os.path.join(report_dir, 'report-{}.html'.format(
-            latest_logfile_info.date_file.strftime('%Y.%m.%d'))
+        _temp_path_to_report = os.path.join(tempfile.gettempdir(),
+                                            'report-{}.html'.format(latest_logfile_info.date_file.strftime('%Y.%m.%d'))
+                                            )
+        _path_to_report = os.path.join(report_dir,
+                                       'report-{}.html'.format(latest_logfile_info.date_file.strftime('%Y.%m.%d'))
                                        )
-        with open(_path_to_report, mode='w') as _report_file:
+
+        with open(_temp_path_to_report, mode='w') as _report_file:
             _report_file.write(_report_template_data)
+        copy2(_temp_path_to_report, _path_to_report)
+
+
+def write_ts(ts_file):
+    with open(ts_file, mode='a') as _ts:
+        _ts.write(str(time()) + '\n')
 
 
 def median(times_list):
@@ -197,6 +210,7 @@ def main(**param):
     log_dir = param.get('LOG_DIR', None)
     report_dir = param.get('REPORT_DIR', None)
     report_size = param.get('REPORT_SIZE', 100)
+    ts_filename = param.get('TS_FILENAME', None)
     if not log_dir or not os.path.isdir(os.path.abspath(log_dir)):
         raise Exception('Не найдена директория с обрабатываемыми файлами!')
 
@@ -223,6 +237,9 @@ def main(**param):
         url = next_line_info.url
         request_time = float(next_line_info.request_time)
         url_times[url].append(request_time)
+
+        if line_count >= 100:
+            break
 
     error_perc = param.get('ERROR_PERC', 10.0)
     calc_error_perc = round(line_error/line_count * 100, 1)
@@ -255,6 +272,10 @@ def main(**param):
     report_data = sorted(report_data, key=lambda line: line['time_sum'])[-report_size:]
 
     save_report(latest_logfile_info, report_dir, report_data)
+    _dir, _file = os.path.split(ts_filename)
+    if not _dir:
+        ts_filename = os.path.join(os.path.curdir, ts_filename)
+    write_ts(ts_filename)
 
 
 if __name__ == "__main__":
