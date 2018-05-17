@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import settings
+import shutil
 import tempfile
 from collections import namedtuple, defaultdict
-from shutil import copy2
 from time import time
 # log_format ui_short '$remote_addr $remote_user $http_x_real_ip [$time_local] "$request" '
 #                     '$status $body_bytes_sent "$http_referer" '
@@ -51,6 +51,13 @@ LogFileInfo = namedtuple(typename='LogFileInfo',
                          ])
 
 
+class LogAnalyzerException(Exception):
+    """
+    Базовый класс возбуждения внутренних исключений
+    """
+    pass
+
+
 def load_config(path_to_config_file):
     """
     Загрузка параметров конфигурации из файла
@@ -59,14 +66,14 @@ def load_config(path_to_config_file):
     """
     
     if not os.path.exists(path_to_config_file) or not os.path.isfile(path_to_config_file):
-        raise Exception('Недействительный путь к файлу конфигурации: {}'.format(path_to_config_file))
+        raise LogAnalyzerException('Недействительный путь к файлу конфигурации: {}'.format(path_to_config_file))
 
     with open(path_to_config_file) as _f:
         try:
             result = json.loads(_f.read())
         except Exception as e:
             logger.exception(e.message)
-            raise Exception('Ошибка считывания параметров из конфигурационного файла')
+            raise LogAnalyzerException('Ошибка считывания параметров из конфигурационного файла')
         else:
             return result
 
@@ -75,7 +82,7 @@ def setup_logging(**param):
     """
     Инициализация параметров логирования
 
-    :param dict param: параметры конфигурации
+    :param str param: параметры конфигурации
     """
     log_file = param.get('LOGGING_FILENAME', None)
     if log_file:
@@ -97,20 +104,20 @@ def get_latest_logfile_info(log_dir):
     :return: информация о последнем лог-файле
     :rtype: LogFileInfo
     """
-    _latest_log = None
-    for _filename in os.listdir(log_dir):
-        match = settings.LOG_FILE_RE_PATTERN.match(_filename)
+    latest_log = None
+    for filename in os.listdir(log_dir):
+        match = settings.LOG_FILE_RE_PATTERN.match(filename)
         if not match:
             continue
-        _log_date_string = match.groupdict()['log_date']
-        _log_date_date = datetime.datetime.strptime(_log_date_string, "%Y%m%d")
-        if not _latest_log or _log_date_date > _latest_log.date_file:
-            _latest_log = LogFileInfo(**dict(
-                path_to_file=os.path.abspath(os.path.join(log_dir, _filename)),
-                date_file=_log_date_date,
+        log_date_string = match.groupdict()['log_date']
+        log_date_date = datetime.datetime.strptime(log_date_string, "%Y%m%d")
+        if not latest_log or log_date_date > latest_log.date_file:
+            latest_log = LogFileInfo(**dict(
+                path_to_file=os.path.abspath(os.path.join(log_dir, filename)),
+                date_file=log_date_date,
                 format_file=match.groupdict()['log_format']
             ))
-    return _latest_log
+    return latest_log
 
 
 def search_report(latest_log_info, report_dir):
@@ -122,9 +129,9 @@ def search_report(latest_log_info, report_dir):
     :return: наличие файла-отчёта для лог-файла
     :rtype: bool
     """
-    _report_file = 'report-{}.html'.format(latest_log_info.date_file.strftime('%Y.%m.%d'))
-    _path_to_report_file = os.path.join(report_dir, _report_file)
-    return os.path.exists(_path_to_report_file)
+    report_file = 'report-{}.html'.format(latest_log_info.date_file.strftime('%Y.%m.%d'))
+    path_to_report_file = os.path.join(report_dir, report_file)
+    return os.path.exists(path_to_report_file)
 
 
 def next_line_iterator(latest_log_info):
@@ -138,8 +145,8 @@ def next_line_iterator(latest_log_info):
     open_fn = gzip.open if latest_log_info.format_file == 'gz' else open
 
     with open_fn(latest_log_info.path_to_file) as f_logfile:
-        for _line in f_logfile:
-            yield _line.decode('utf-8')
+        for line in f_logfile:
+            yield line.decode('utf-8')
 
 
 def get_next_line_info(line):
@@ -167,27 +174,27 @@ def save_report(latest_logfile_info, report_dir, parse_data):
     :param list[dict] parse_data: данные для отчёта
     :return:
     """
-    _table_json = json.dumps(parse_data)
+    table_json = json.dumps(parse_data)
     if not os.path.exists(report_dir):
         os.makedirs(report_dir)
-    _path_to_template = os.path.normpath(os.path.join(os.path.dirname(__file__), 'report.html'))
-    with open(_path_to_template, mode='r') as _report_template_file:
-        _report_template_data = _report_template_file.read().replace('$table_json', _table_json)
-        _temp_path_to_report = os.path.join(tempfile.gettempdir(),
+    path_to_template = os.path.normpath(os.path.join(os.path.dirname(__file__), 'report.html'))
+    with open(path_to_template, mode='r') as report_template_file:
+        report_template_data = report_template_file.read().replace('$table_json', table_json)
+        temp_path_to_report = os.path.join(tempfile.gettempdir(),
                                             'report-{}.html'.format(latest_logfile_info.date_file.strftime('%Y.%m.%d'))
                                             )
-        _path_to_report = os.path.join(report_dir,
-                                       'report-{}.html'.format(latest_logfile_info.date_file.strftime('%Y.%m.%d'))
-                                       )
+        path_to_report = os.path.join(report_dir,
+                                      'report-{}.html'.format(latest_logfile_info.date_file.strftime('%Y.%m.%d'))
+                                     )
 
-        with open(_temp_path_to_report, mode='w') as _report_file:
-            _report_file.write(_report_template_data)
-        copy2(_temp_path_to_report, _path_to_report)
+        with open(temp_path_to_report, mode='w') as report_file:
+            report_file.write(report_template_data)
+        shutil.move(temp_path_to_report, path_to_report)
 
 
 def write_ts(ts_file):
-    with open(ts_file, mode='a') as _ts:
-        _ts.write(str(time()) + '\n')
+    with open(ts_file, mode='a') as ts:
+        ts.write(str(time()) + '\n')
 
 
 def median(times_list):
@@ -212,10 +219,10 @@ def main(**param):
     report_size = param.get('REPORT_SIZE', 100)
     ts_filename = param.get('TS_FILENAME', None)
     if not log_dir or not os.path.isdir(os.path.abspath(log_dir)):
-        raise Exception('Не найдена директория с обрабатываемыми файлами!')
+        raise LogAnalyzerException('Не найдена директория с обрабатываемыми файлами!')
 
     if not report_dir or not os.path.isdir(os.path.abspath(report_dir)):
-        raise Exception('Не найдена директория для хранения отчётов!')
+        raise LogAnalyzerException('Не найдена директория для хранения отчётов!')
 
     latest_logfile_info = get_latest_logfile_info(log_dir)
 
@@ -237,9 +244,6 @@ def main(**param):
         url = next_line_info.url
         request_time = float(next_line_info.request_time)
         url_times[url].append(request_time)
-
-        if line_count >= 100:
-            break
 
     error_perc = param.get('ERROR_PERC', 10.0)
     calc_error_perc = round(line_error/line_count * 100, 1)
@@ -272,8 +276,7 @@ def main(**param):
     report_data = sorted(report_data, key=lambda line: line['time_sum'])[-report_size:]
 
     save_report(latest_logfile_info, report_dir, report_data)
-    _dir, _file = os.path.split(ts_filename)
-    if not _dir:
+    if not os.path.dirname(ts_filename):
         ts_filename = os.path.join(os.path.curdir, ts_filename)
     write_ts(ts_filename)
 
